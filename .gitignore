@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+# Real deployment files must never be committed: the real policy contains
+# the home's device inventory, the others contain credentials.
+policy.json
+nextcloud.json
+llm.json
+*.key
+fw-target.conf
