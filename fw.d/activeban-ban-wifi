@@ -1,0 +1,27 @@
+#!/bin/sh
+# activeban external command: Wi-Fi association refusal (OpenWrt hostapd)
+# Contract: arguments = MAC IP TTL_SECONDS; exit 0 = success, non-zero = failure.
+# Target settings live in /etc/activeban/fw-target.conf:
+#   FW_HOST / FW_USER / FW_KEY, optional WIFI_IFACES (default: "wlan0 wlan1")
+#
+# Adds the MAC to hostapd's deny ACL and deauthenticates it if connected.
+# This excludes the device from that AP entirely, including LAN traffic.
+# Notes:
+# - The deny ACL is runtime state and disappears when hostapd restarts.
+# - It only affects clients associated with this AP. A client that roams to
+#   another vendor's mesh node is outside this command's reach.
+# - TTL is managed by the activeban daemon; hostapd has no per-entry TTL here.
+set -eu
+CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
+# shellcheck disable=SC1090
+. "$CONF"
+MAC="$(echo "$1" | tr 'A-F' 'a-f')"
+IFACES="${WIFI_IFACES:-wlan0 wlan1}"
+FAILED=0
+for IF in $IFACES; do
+  ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+    "$FW_USER@$FW_HOST" -- \
+    "hostapd_cli -i $IF deny_acl ADD_MAC $MAC >/dev/null 2>&1; hostapd_cli -i $IF deauthenticate $MAC >/dev/null 2>&1; true" \
+    || FAILED=1
+done
+[ "$FAILED" -eq 0 ]

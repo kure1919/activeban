@@ -1,0 +1,7 @@
+#!/bin/sh
+# activeban 外部コマンド（既定・安全側）: 解除の意図をログに残すだけ。実機には触らない。
+# 契約: 引数 = MAC IP / 終了コード 0 = 成功
+set -eu
+LOG="${ACTIVEBAN_FW_LOG:-/var/log/activeban-fw.log}"
+echo "$(date -Is) RELEASE mac=$1 ip=$2" >> "$LOG"
+exit 0

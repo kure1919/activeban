@@ -1,0 +1,36 @@
+#!/bin/sh
+# Template for a custom activeban enforcement command: BAN.
+#
+# Copy this file to /usr/local/sbin/activeban-ban, make it executable, and
+# replace the "not implemented" exit below with your enforcement action.
+#
+# Contract (see docs/integration.md):
+#   $1 = MAC address, uppercase, AA:BB:CC:DD:EE:FF
+#   $2 = IP address observed at detection time, or an empty string
+#   $3 = TTL in decimal seconds
+#   exit 0     = the ban is now in effect
+#   exit != 0  = failure; activeban will not record the ban
+# Requirements:
+# - Be idempotent: banning an already-banned MAC should normally succeed.
+# - Finish within 30 seconds (the daemon's command timeout).
+# - Do not read interactive input.
+# - Use absolute paths; do not depend on the working directory.
+# - Keep credentials outside this script where practical.
+set -eu
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: activeban-ban MAC IP TTL_SECONDS" >&2
+  exit 64
+fi
+
+MAC="$1"
+IP="$2"
+TTL_SECONDS="$3"
+
+# TODO: apply the ban for "$MAC" here. Use "$IP" only as detection-time
+# context; the MAC is the identity. Honour "$TTL_SECONDS" in the enforcement
+# layer if it supports expiry, otherwise leave expiry to the daemon and make
+# sure release removes the state.
+
+echo "activeban-ban-template: enforcement action is not implemented" >&2
+exit 1

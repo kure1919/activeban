@@ -1,0 +1,27 @@
+[Unit]
+Description=activeban control daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quarantine
+Group=activeban
+ExecStart=/usr/bin/python3 /usr/local/sbin/activeban.py serve
+RuntimeDirectory=activeban
+StateDirectory=activeban
+LogsDirectory=activeban
+Environment=ACTIVEBAN_POLICY=/etc/activeban/policy.json
+Environment=ACTIVEBAN_STATE=/var/lib/activeban/state.json
+Environment=ACTIVEBAN_LOG=/var/log/activeban/activeban.log
+Environment=ACTIVEBAN_FW_LOG=/var/log/activeban/fw.log
+Environment=ACTIVEBAN_SOCK=/run/activeban/activeban.sock
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/activeban /var/log/activeban /run/activeban
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

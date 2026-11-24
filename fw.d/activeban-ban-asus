@@ -1,0 +1,22 @@
+#!/bin/sh
+# activeban 外部コマンド（ASUS ルーター / iptables 版）
+# 契約: 引数 = MAC IP TTL秒 / 終了コード 0 = 成功
+# 接続情報は /etc/activeban/fw-target.conf に置く（このファイルには書かない）:
+#   FW_HOST=192.168.1.1
+#   FW_USER=admin
+#   FW_KEY=/etc/activeban/router_key
+# TTL は iptables 側では使わない（期限管理は activeban デーモンの役目）。
+set -eu
+CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
+# shellcheck disable=SC1090
+. "$CONF"
+MAC="$1"
+# 重複投入で二重に積まないよう、既存ルールがあれば成功扱いで終わる
+if ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+     "$FW_USER@$FW_HOST" -- \
+     iptables -C FORWARD -m mac --mac-source "$MAC" -j DROP 2>/dev/null; then
+  exit 0
+fi
+ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  "$FW_USER@$FW_HOST" -- \
+  iptables -I FORWARD -m mac --mac-source "$MAC" -j DROP

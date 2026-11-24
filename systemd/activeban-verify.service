@@ -1,0 +1,21 @@
+[Unit]
+Description=activeban LLM verification loop (qllm)
+After=network-online.target activeban.service
+Wants=network-online.target
+Requires=activeban.service
+
+[Service]
+Type=simple
+User=qllm
+Group=activeban
+ExecStart=/usr/bin/python3 /usr/local/sbin/activeban.py verify-loop
+Environment=ACTIVEBAN_SOCK=/run/activeban/activeban.sock
+Environment=ACTIVEBAN_LLM_CONF=/etc/activeban/llm.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

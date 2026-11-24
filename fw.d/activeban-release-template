@@ -1,0 +1,32 @@
+#!/bin/sh
+# Template for a custom activeban enforcement command: RELEASE.
+#
+# Copy this file to /usr/local/sbin/activeban-release, make it executable,
+# and replace the "not implemented" exit below with your release action.
+#
+# Contract (see docs/integration.md):
+#   $1 = MAC address, uppercase, AA:BB:CC:DD:EE:FF
+#   $2 = IP address recorded for the ban, or an empty string
+#   exit 0     = the device is no longer banned
+#   exit != 0  = failure; activeban keeps the ban in its state and can retry
+# Requirements:
+# - Be idempotent: releasing a MAC that is not banned must succeed.
+# - Finish within 30 seconds (the daemon's command timeout).
+# - Do not read interactive input.
+# - Use absolute paths; do not depend on the working directory.
+# - Keep credentials outside this script where practical.
+set -eu
+
+if [ "$#" -ne 2 ]; then
+  echo "usage: activeban-release MAC IP" >&2
+  exit 64
+fi
+
+MAC="$1"
+IP="$2"
+
+# TODO: remove the ban for "$MAC" here. Treat "$IP" as recorded context;
+# remove by MAC identity whenever the enforcement layer permits it.
+
+echo "activeban-release-template: enforcement action is not implemented" >&2
+exit 1

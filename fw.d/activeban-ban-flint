@@ -1,0 +1,24 @@
+#!/bin/sh
+# activeban 外部コマンド（Flint 2 / OpenWrt nftables 版）
+# 契約: 引数 = MAC IP TTL秒 / 終了コード 0 = 成功
+# 接続情報は /etc/activeban/fw-target.conf（FW_HOST / FW_USER / FW_KEY）。
+#
+# 前提: Flint 側に専用テーブルを一度だけ作っておく（fw4 のテーブルには
+# 触らないので fw4 のリロードと競合しない）:
+#   nft add table inet activeban
+#   nft add set inet activeban quarantine '{ type ether_addr; flags timeout; }'
+#   nft add chain inet activeban forward '{ type filter hook forward priority -10; policy accept; }'
+#   nft add rule inet activeban forward ether saddr @quarantine drop
+# 注意: このテーブルは再起動で消える。永続化は Flint 側の起動処理
+# （rc.local 等で上記を再投入）が別途必要。
+# TTL は nft の element timeout にそのまま渡す（デーモン側の TTL と二重管理に
+# なるが、片方が死んでももう片方が解除する安全側の冗長）。
+set -eu
+CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
+# shellcheck disable=SC1090
+. "$CONF"
+MAC="$(echo "$1" | tr 'A-F' 'a-f')"
+TTL="$3"
+ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  "$FW_USER@$FW_HOST" -- \
+  nft add element inet activeban quarantine "{ $MAC timeout ${TTL}s }"

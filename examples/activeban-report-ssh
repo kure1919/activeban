@@ -1,0 +1,15 @@
+#!/bin/sh
+# SSH forced-command receiver for a remote detector.
+#
+# Install on the activeban host as /usr/local/sbin/activeban-report-ssh,
+# owned by root and executable. Add the detector's public key to the
+# qdetect account's authorized_keys with a forced command, for example:
+#
+#   command="/usr/local/sbin/activeban-report-ssh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA... detector
+#
+# The detector sends exactly one JSON event on stdin. Any command requested
+# by the SSH client is ignored. This wrapper runs as qdetect, so the CLI's
+# Unix-socket peer UID gives the request the machine role.
+set -eu
+ACTIVEBAN_CLI="${ACTIVEBAN_CLI:-/usr/local/sbin/activeban.py}"
+exec /usr/bin/python3 "$ACTIVEBAN_CLI" report --json-stdin

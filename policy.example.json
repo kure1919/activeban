@@ -1,0 +1,23 @@
+{
+ "lang": "en",
+ "cooldown_hours": 24,
+ "default_ttl_seconds": 21600,
+ "do_not_block": [
+  "00:11:22:33:44:01",
+  "00:11:22:33:44:02"
+ ],
+ "flap_threshold": 2,
+ "ban_cmd": "/usr/local/sbin/activeban-ban",
+ "release_cmd": "/usr/local/sbin/activeban-release",
+ "role_users": {
+  "qdetect": "machine",
+  "qllm": "llm"
+ },
+ "socket_group": "activeban",
+ "trigger_classes": {
+  "canary": "test",
+  "behavior": "normal",
+  "intel": "high",
+  "manual": "manual"
+ }
+}

@@ -1,0 +1,16 @@
+#!/bin/sh
+# activeban external command: release an ASUS router iptables ban
+# Contract: arguments = MAC IP; exit 0 = success, non-zero = failure.
+# A missing rule is success (idempotent). Target settings: fw-target.conf.
+set -eu
+CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
+# shellcheck disable=SC1090
+. "$CONF"
+MAC="$1"
+SSH="ssh -i $FW_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes $FW_USER@$FW_HOST --"
+# Establish that the router is reachable before treating a missing rule as
+# "already released"; otherwise an SSH failure would look like success.
+$SSH true
+if $SSH iptables -C FORWARD -m mac --mac-source "$MAC" -j DROP 2>/dev/null; then
+  $SSH iptables -D FORWARD -m mac --mac-source "$MAC" -j DROP
+fi

@@ -1,0 +1,8 @@
+#!/bin/sh
+# activeban 外部コマンド（既定・安全側）: バンの意図をログに残すだけ。実機には触らない。
+# 契約: 引数 = MAC IP TTL秒 / 終了コード 0 = 成功
+# ログ先は環境変数 ACTIVEBAN_FW_LOG で変更可。
+set -eu
+LOG="${ACTIVEBAN_FW_LOG:-/var/log/activeban-fw.log}"
+echo "$(date -Is) BAN mac=$1 ip=$2 ttl=$3" >> "$LOG"
+exit 0
