@@ -102,10 +102,11 @@ Details and the staged procedure are in
 
 - `activeban.py` — daemon + CLI + LLM verification loop (single file, stdlib only)
 - `deploy.sh` — idempotent installer (users, files, systemd units; log-only pair)
-- `policy.example.json` — copy to `/etc/activeban/policy.json` and edit
 - `fw.d/` — example enforcement commands (log / ASUS / OpenWrt / templates)
-- `examples/` — integration helpers, including the SSH forced-command
-  receiver for a detector on another host
+- `examples/` — sample configuration files (`policy.example.json`,
+  `nextcloud.example.json`, `llm.example.json`, `openai.key.example`)
+  and integration helpers, including the SSH forced-command receiver
+  for a detector on another host
 - `systemd/` — `activeban.service` (daemon, unprivileged user) and
   `activeban-verify.service` (LLM loop, separate user)
 - `docs/design.md` — design notes and the reasoning behind the authority model
@@ -122,10 +123,10 @@ Details and the staged procedure are in
    `/usr/local/sbin/activeban-ban` and `/usr/local/sbin/activeban-release`.
 3. Prepare the configuration in the repository root (real files are
    covered by `.gitignore` and cannot be committed by accident):
-   - `policy.json`: copy `policy.example.json` and edit
-   - `nextcloud.json`: copy `nextcloud.example.json` (Talk credentials)
-   - `llm.json`: copy `llm.example.json`
-   - `openai.key`: the API key itself, one line (see `openai.key.example`)
+   - `policy.json`: copy `examples/policy.example.json` and edit
+   - `nextcloud.json`: copy `examples/nextcloud.example.json` (Talk credentials)
+   - `llm.json`: copy `examples/llm.example.json`
+   - `openai.key`: the API key itself, one line (see `examples/openai.key.example`)
    Then run `deploy.sh` as root: it installs everything, including the
    secret files with owner `root:<reader>` and mode `640`.
 4. Install the systemd units, `systemctl enable --now activeban activeban-verify`.

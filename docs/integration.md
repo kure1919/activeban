@@ -386,9 +386,8 @@ names `activeban-ban` and `activeban-release`.
 {"base_url": "https://nextcloud.example", "user": "...", "password": "...", "token": "talk-room-token"}
 ```
 
-Example files (`nextcloud.example.json`, `llm.example.json`,
-`openai.key.example`, `policy.example.json`) are included in the
-repository. Copy each to its real name in the repository root, fill it
+Example files are included under `examples/` (`policy.example.json`,
+`nextcloud.example.json`, `llm.example.json`, `openai.key.example`). Copy each to its real name in the repository root, fill it
 in, and run `deploy.sh`: real filenames are listed in `.gitignore`, and
 the deploy script installs the secret files to `/etc/activeban/` with
 owner `root:<reader>` and mode `640` (`nextcloud.json` is read by the

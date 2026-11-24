@@ -29,7 +29,7 @@ if [ -f "$SRC/policy.json" ]; then
 elif [ -f /etc/activeban/policy.json ]; then
   echo "policy : keeping existing /etc/activeban/policy.json"
 else
-  echo "MISSING: /etc/activeban/policy.json - create it from policy.example.json first"
+  echo "MISSING: /etc/activeban/policy.json - create it from examples/policy.example.json first"
 fi
 
 # --- systemd ---
@@ -52,9 +52,9 @@ install_secret() {
     echo "MISSING: $1 - copy $2 to $1 next to deploy.sh, fill it in, re-run"
   fi
 }
-install_secret nextcloud.json nextcloud.example.json quarantine
-install_secret llm.json llm.example.json qllm
-install_secret openai.key openai.key.example qllm
+install_secret nextcloud.json examples/nextcloud.example.json quarantine
+install_secret llm.json examples/llm.example.json qllm
+install_secret openai.key examples/openai.key.example qllm
 
 echo "== installed =="
 echo "daemon : systemctl enable --now activeban"
