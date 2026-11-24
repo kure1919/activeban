@@ -2,7 +2,9 @@
 # activeban installer (run as root, idempotent).
 # Run from the root of a clone/copy of this repository.
 # Installs the log-only enforcement pair. Swap in a real pair afterwards.
-# Never creates files containing secrets (nextcloud.json / llm.json / openai.key).
+# Secret files (nextcloud.json / llm.json / openai.key) are installed only
+# when you place the real files next to this script; it never creates their
+# contents, and .gitignore keeps them out of commits.
 set -eu
 [ "$(id -u)" = "0" ] || { echo "run as root" >&2; exit 1; }
 SRC=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -35,17 +37,26 @@ install -m 0644 "$SRC/systemd/activeban.service" /etc/systemd/system/activeban.s
 install -m 0644 "$SRC/systemd/activeban-verify.service" /etc/systemd/system/activeban-verify.service
 systemctl daemon-reload
 
+# --- files containing secrets ---
+# Place the real files next to deploy.sh (same names, without .example);
+# they are listed in .gitignore, so they cannot be committed by accident.
+# Installed with owner root:<reader> and mode 640. Existing files in
+# /etc/activeban are kept when no source file is present.
+install_secret() {
+  if [ -f "$SRC/$1" ]; then
+    install -m 0640 -o root -g "$3" "$SRC/$1" "/etc/activeban/$1"
+    echo "secret : installed /etc/activeban/$1 (root:$3 640)"
+  elif [ -e "/etc/activeban/$1" ]; then
+    echo "secret : keeping existing /etc/activeban/$1"
+  else
+    echo "MISSING: $1 - copy $2 to $1 next to deploy.sh, fill it in, re-run"
+  fi
+}
+install_secret nextcloud.json nextcloud.example.json quarantine
+install_secret llm.json llm.example.json qllm
+install_secret openai.key openai.key.example qllm
+
 echo "== installed =="
 echo "daemon : systemctl enable --now activeban"
-echo "verify : place llm.json and openai.key, then systemctl enable --now activeban-verify"
-for f in nextcloud.json llm.json openai.key; do
-  if [ -e "/etc/activeban/$f" ]; then
-    echo "found  : /etc/activeban/$f"
-  else
-    echo "MISSING: /etc/activeban/$f (create it locally; never paste secrets into chat)"
-  fi
-done
-echo "  nextcloud.json: {\"base_url\": \"https://<nextcloud>\", \"user\": \"...\", \"password\": \"...\", \"token\": \"<talk-room-token>\"}  owner root:quarantine 640"
-echo "  llm.json      : {\"api_key_file\": \"/etc/activeban/openai.key\", \"model\": \"gpt-4o-mini\"}  owner root:qllm 640"
-echo "  openai.key    : the OpenAI API key itself (one line)  owner root:qllm 640"
+echo "verify : systemctl enable --now activeban-verify"
 echo "note: qdetect is nologin for now; switch it to /bin/sh when adding the SSH forced-command bridge."

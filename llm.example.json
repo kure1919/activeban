@@ -1,0 +1,4 @@
+{
+  "api_key_file": "/etc/activeban/openai.key",
+  "model": "gpt-4o-mini"
+}

@@ -1,0 +1,6 @@
+{
+  "base_url": "https://nextcloud.example.com",
+  "user": "activeban",
+  "password": "REPLACE-ME",
+  "token": "REPLACE-ME-talk-room-token"
+}

@@ -120,9 +120,14 @@ Details and the staged procedure are in
    (`role_users`).
 2. Install `activeban.py` to `/usr/local/sbin/`, the log-only command pair as
    `/usr/local/sbin/activeban-ban` and `/usr/local/sbin/activeban-release`.
-3. Prepare `/etc/activeban/policy.json`, plus:
-   - `nextcloud.json`: `{"base_url", "user", "password", "token"}` (Talk room)
-   - `llm.json`: `{"api_key_file": "/etc/activeban/openai.key", "model": "..."}`
+3. Prepare the configuration in the repository root (real files are
+   covered by `.gitignore` and cannot be committed by accident):
+   - `policy.json`: copy `policy.example.json` and edit
+   - `nextcloud.json`: copy `nextcloud.example.json` (Talk credentials)
+   - `llm.json`: copy `llm.example.json`
+   - `openai.key`: the API key itself, one line (see `openai.key.example`)
+   Then run `deploy.sh` as root: it installs everything, including the
+   secret files with owner `root:<reader>` and mode `640`.
 4. Install the systemd units, `systemctl enable --now activeban activeban-verify`.
 5. Try it (as root = human):
    - `activeban.py ban <a protected MAC>` → refused
