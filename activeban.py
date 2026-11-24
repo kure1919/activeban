@@ -558,13 +558,31 @@ def verify_loop(once=False):
     扱い、指示としては読まない。"""
     conf = load_json(LLM_CONF, {})
     key_path = conf.get("api_key_file", "/etc/activeban/openai.key")
-    with open(key_path, encoding="utf-8") as f:
-        api_key = f.read().strip()
+    while True:
+        try:
+            with open(key_path, encoding="utf-8") as f:
+                api_key = f.read().strip()
+            break
+        except OSError as e:
+            # 鍵がまだ配置されていない等では落とさず待つ（systemd の
+            # 再起動ループで journal を埋めないため）
+            print(f"cannot read API key {key_path}: {e}", file=sys.stderr)
+            if once:
+                raise
+            time.sleep(30)
     model = conf.get("model", "gpt-4o-mini")
     system = verify_system_prompt(
         conf.get("lang") or load_json(POLICY_PATH, {}).get("lang"))
     while True:
-        res = call({"cmd": "pending"})
+        try:
+            res = call({"cmd": "pending"})
+        except OSError as e:
+            # daemon 未起動・再起動中はソケットが無い。落とさず待つ。
+            print(f"daemon unreachable: {e}", file=sys.stderr)
+            if once:
+                return
+            time.sleep(30)
+            continue
         for rec in res.get("pending", []):
             payload = {"mac": rec["mac"], "ip": rec.get("ip"),
                        "trigger": rec["trigger"], "reason": rec["reason"],
