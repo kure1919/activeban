@@ -8,6 +8,7 @@ Requires=activeban.service
 Type=simple
 User=qllm
 Group=activeban
+SupplementaryGroups=qllm
 ExecStart=/usr/bin/python3 /usr/local/sbin/activeban.py verify-loop
 Environment=ACTIVEBAN_SOCK=/run/activeban/activeban.sock
 Environment=ACTIVEBAN_LLM_CONF=/etc/activeban/llm.json

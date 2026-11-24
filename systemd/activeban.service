@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=quarantine
 Group=activeban
+SupplementaryGroups=quarantine
 ExecStart=/usr/bin/python3 /usr/local/sbin/activeban.py serve
 RuntimeDirectory=activeban
 StateDirectory=activeban
