@@ -27,6 +27,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -617,7 +618,15 @@ def verify_loop(once=False):
                       "reason": str(verdict.get("reason", ""))[:500]})
             except Exception as e:
                 # API が落ちている間はバンを維持する（解除側に倒さない）
-                print(f"verify failed for {rec['mac']}: {e}", file=sys.stderr)
+                detail = ""
+                if isinstance(e, urllib.error.HTTPError):
+                    try:
+                        detail = " " + e.read().decode(
+                            "utf-8", "replace")[:300].replace("\n", " ")
+                    except Exception:
+                        pass
+                print(f"verify failed for {rec['mac']}: {e}{detail}",
+                      file=sys.stderr)
         if once:
             return
         time.sleep(30)
