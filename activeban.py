@@ -171,6 +171,8 @@ class Talker:
         self.msg = MESSAGES[pick_lang(lang)]
         self.conf = load_json(NC_CONF, None)
         self.lock = threading.Lock()
+        self._last_flush_try = 0
+        self._last_fail_log = 0
 
     def _post(self, text):
         if not self.conf:
@@ -189,7 +191,11 @@ class Talker:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return resp.status in (200, 201)
         except Exception as e:  # 通知失敗はスプールへ（アラートを消さない）
-            self.log.write("talk_fail", error=str(e)[:200])
+            # 障害が続く間、失敗ログは5分に1回まで（tick の flush が
+            # 5秒ごとに再試行してもログが溢れないように）
+            if now() - self._last_fail_log >= 300:
+                self._last_fail_log = now()
+                self.log.write("talk_fail", error=str(e)[:200])
             return False
 
     def notify(self, text):
@@ -218,6 +224,10 @@ class Talker:
             self.log.write("talk_flushed", count=len(items))
 
     def flush(self):
+        # tick（5秒間隔）からの定期 flush は最大で60秒に1回だけ試す
+        if now() - self._last_flush_try < 60:
+            return
+        self._last_flush_try = now()
         with self.lock:
             self._flush_locked()
 
