@@ -1,0 +1,36 @@
+#!/bin/sh
+# activeban external command: webhook (RELEASE).
+# Contract: arguments = MAC IP; exit 0 = success, non-zero = failure.
+# Target settings live in /etc/activeban/fw-target.conf:
+#   WEBHOOK_RELEASE_URL  URL POSTed to when a ban is released
+#   WEBHOOK_BAN_URL      URL POSTed to when a ban takes effect (ban pair)
+#   WEBHOOK_HEADER       optional, one extra header line, e.g.
+#                        "Authorization: Bearer TOKEN"
+#
+# The request body is JSON:
+#   {"action": "release", "mac": "...", "ip": "..."}
+#
+# See activeban-ban-webhook for the design notes. A failed release
+# (HTTP status >= 400, unreachable host) exits non-zero; the daemon
+# then keeps the ban in its state so the release can be retried.
+set -eu
+CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
+# shellcheck disable=SC1090
+. "$CONF"
+
+if [ "$#" -ne 2 ]; then
+  echo "usage: activeban-release-webhook MAC IP" >&2
+  exit 64
+fi
+MAC="$1"
+IP="$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+
+BODY="{\"action\": \"release\", \"mac\": \"$MAC\", \"ip\": \"$IP\"}"
+
+if [ -n "${WEBHOOK_HEADER:-}" ]; then
+  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
+    -H "$WEBHOOK_HEADER" -d "$BODY" "$WEBHOOK_RELEASE_URL" >/dev/null
+else
+  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
+    -d "$BODY" "$WEBHOOK_RELEASE_URL" >/dev/null
+fi

@@ -4,12 +4,23 @@ An **AI-driven active ban system** for home networks: **machine detection bans
 a device immediately, an LLM reviews the ban afterwards and releases false
 positives, and a human has the final say.**
 
-activeban is the *control layer* only. Detection (what looks dangerous) and
-enforcement (how a ban is applied) are both external and pluggable:
+**The banning is the easy part. The point of activeban is the authority
+model**: who is allowed to ban, who is allowed to release, whose release
+outranks whose, and what stops the automation from flapping — that control
+layer is what this project is. (The full model is under
+[Authority model](#authority-model) below.)
+
+Around that core, activeban is the *control layer* only. Detection (what
+looks dangerous) and enforcement (how a ban is applied) are both external
+and pluggable:
 
 - **Detection** feeds events into activeban (`report`). Anything that can call
   a CLI — or pipe one JSON object to `report --json-stdin` — works: a DNS
   monitor, Suricata, Zeek, a log watcher, …
+  A published detector that speaks this contract:
+  [lanlookout](https://github.com/kure1919/lanlookout), a home-LAN
+  baseline anomaly monitor (DNS via Pi-hole today, router flow data
+  planned). It is one detector among possible ones, not a required part.
 - **Enforcement** is delegated to two external commands you provide
   (`ban_cmd` / `release_cmd`), called with `(MAC, IP, TTL)` / `(MAC, IP)`.
   Example scripts are included for:
@@ -18,9 +29,11 @@ enforcement (how a ban is applied) are both external and pluggable:
   - OpenWrt — SSH + nftables (WAN block, TTL also enforced by nft itself)
   - OpenWrt Wi-Fi — SSH + hostapd deny ACL + deauthenticate
     (full network exclusion, lateral traffic included)
+  - webhook — POST a JSON event to any HTTP endpoint, and let the far
+    end decide what a ban means (a Home Assistant automation switching
+    a smart plug off, a managed switch API, a ticket for a human, …)
   - anything else that can be scripted the same way — e.g. moving a client
-    to a quarantine VLAN, or shutting a managed switch port — is just
-    another command pair.
+    to a quarantine VLAN — is just another command pair.
 
 > **Status: experimental "utakata" project** — *utakata* (泡沫) is foam on
 > water: here today, gone tomorrow. Built for the author's own home,

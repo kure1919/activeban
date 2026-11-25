@@ -1,0 +1,48 @@
+#!/bin/sh
+# activeban external command: webhook (BAN).
+# Contract: arguments = MAC IP TTL_SECONDS; exit 0 = success, non-zero = failure.
+# Target settings live in /etc/activeban/fw-target.conf:
+#   WEBHOOK_BAN_URL      URL POSTed to when a ban takes effect
+#   WEBHOOK_RELEASE_URL  URL POSTed to when a ban is released (release pair)
+#   WEBHOOK_HEADER       optional, one extra header line, e.g.
+#                        "Authorization: Bearer TOKEN"
+#
+# The request body is JSON:
+#   {"action": "ban", "mac": "...", "ip": "...", "ttl_seconds": 21600}
+#
+# This pair is the generic escape hatch for enforcement that does not
+# fit the router/AP scripts: a Home Assistant webhook that switches a
+# smart plug off, a call to a managed switch's API, a message to a
+# human who unplugs things by hand - anything with an HTTP endpoint.
+# What the far end does with the event is entirely up to it.
+#
+# Notes:
+# - Requires curl. Any HTTP status >= 400 counts as failure
+#   (curl -f), so the daemon will not record a ban the far end
+#   rejected.
+# - TTL expiry is driven by the daemon, which calls the release pair;
+#   the webhook itself does not need to honour the TTL.
+# - Be careful who can reach the far-end URL: it now holds ban power
+#   over your devices. Keep it on the LAN or behind authentication.
+set -eu
+CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
+# shellcheck disable=SC1090
+. "$CONF"
+
+if [ "$#" -ne 3 ]; then
+  echo "usage: activeban-ban-webhook MAC IP TTL_SECONDS" >&2
+  exit 64
+fi
+MAC="$1"
+IP="$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+TTL_SECONDS="$3"
+
+BODY="{\"action\": \"ban\", \"mac\": \"$MAC\", \"ip\": \"$IP\", \"ttl_seconds\": $TTL_SECONDS}"
+
+if [ -n "${WEBHOOK_HEADER:-}" ]; then
+  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
+    -H "$WEBHOOK_HEADER" -d "$BODY" "$WEBHOOK_BAN_URL" >/dev/null
+else
+  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
+    -d "$BODY" "$WEBHOOK_BAN_URL" >/dev/null
+fi

@@ -485,6 +485,10 @@ FW_USER=admin
 FW_KEY=/etc/activeban/router_key
 # Wi-Fi pair only; space-separated hostapd interface names:
 WIFI_IFACES="wlan0 wlan1"
+# Webhook pair only; URLs POSTed to on ban / release:
+WEBHOOK_BAN_URL="http://homeassistant.local:8123/api/webhook/activeban-ban"
+WEBHOOK_RELEASE_URL="http://homeassistant.local:8123/api/webhook/activeban-release"
+# WEBHOOK_HEADER="Authorization: Bearer TOKEN"
 ```
 
 Because the examples source this file as shell, protect it as trusted local
@@ -502,6 +506,7 @@ names `activeban-ban` and `activeban-release`.
 | `asus` | ASUS router over SSH | Adds/removes an iptables `FORWARD` MAC DROP rule. | Router rules may persist across daemon restarts; TTL and removal are daemon-driven. Verify AiMesh and reboot behaviour on the actual router. |
 | `flint` | OpenWrt over SSH | Adds/removes a MAC in the nftables set `inet activeban quarantine`. | Passes TTL to nft as an element timeout as well. The dedicated table/set/chain must be created first and recreated after reboot; see the script header. |
 | `wifi` | OpenWrt hostapd over SSH | Adds/removes a MAC in hostapd's deny ACL and deauthenticates on ban. | Runtime-only: hostapd restart clears it. Applies only to clients of that AP. |
+| `webhook` | any HTTP endpoint | POSTs a JSON event (`action`, `mac`, `ip`, `ttl_seconds`) to a configured URL. The far end decides what a ban means: a Home Assistant automation switching a smart plug off, a managed switch API, a ticket for a human. | The far end holds the state; TTL and release are daemon-driven. HTTP status ≥ 400 counts as failure. Guard the URL: it holds ban power. |
 | `template` | custom | Argument-checked starting point that deliberately exits `1` until implemented. | Replace the placeholder with a real, idempotent action. |
 
 ---
