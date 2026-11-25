@@ -94,5 +94,21 @@ element timeout, so expiry does not depend on the daemon being alive).
   threat-intel matching, …). Garbage events in, garbage bans out — the LLM
   review and cooldowns limit the blast radius, they do not fix a bad
   detector.
+- Not a WAF, and not an inbound IPS. A WAF inspects HTTP requests at a
+  reverse proxy and rejects malicious requests one by one; an inbound
+  IPS pattern (Suricata sees an attack from the internet → the
+  perimeter firewall blocks the attacker's source IP) is the
+  fail2ban / CrowdSec-bouncer shape. That problem is **IP-keyed**, and
+  its failure modes are different from banning a LAN device: source
+  IPs can be spoofed (UDP), shared (CGNAT, CDN and cloud egress —
+  blocking one address can block many legitimate users), and ephemeral
+  (per-IP history and cooldowns are worth little; the false-positive
+  unit is signature × endpoint, not a device). activeban's identity,
+  state and enforcement contract are MAC-keyed for devices you own.
+  The *control pattern* (report → immediate block → post-review →
+  TTL/cooldown) could be re-implemented for IP blocking, but that is a
+  sibling system, not a configuration of this one — and where a
+  CrowdSec-style stack already guards the public face, it already
+  fills that role.
 - Not a guarantee. A determined attacker already inside the LAN is out of
   scope; this is a first-response system for commodity IoT compromise.

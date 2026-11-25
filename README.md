@@ -75,6 +75,41 @@ The LLM receives detection data as structured JSON. Device names and DNS
 strings are attacker-controlled data: the review prompt treats them strictly
 as data, never as instructions.
 
+### Device identity
+
+Detectors identify a device by MAC, IP, and human-assigned name —
+send **everything known at once** in one object
+(`{"mac": ..., "ip": ..., "name": ...}`, at least one field), because
+the extra fields are both cross-checks (a MAC/IP disagreement is itself
+evidence) and inference material for the LLM. Resolution is
+strictly ordered: **MAC first, then IP, then name**. An IP is resolved
+to the MAC that held it *at the event time* (DHCP addresses rot; the
+current mapping may already be another device), and a name matches only
+exactly — names have typos and duplicates, so several exact matches are
+ambiguous, not a match.
+
+A ban needs a MAC; an event whose MAC cannot be determined is reported
+for human judgement, never banned on a guess. When a device cannot be
+identified mechanically, the candidate rows of the device table are
+given to the LLM to infer the device from clues (OUI vendor from the
+MAC prefix, DHCP hostname, last IP, type, last seen) — and that
+inference is always reported **with a warning that it is an estimate**.
+Human-facing notifications lead with the device name (nobody manages a
+fleet by MAC address); internally, profiles, the do-not-block list and
+enforcement stay keyed by MAC. The device table is meant to be
+generated from the name registry, the DHCP lease/reservation table,
+IP↔MAC history and an OUI table — see
+[`docs/integration.md`](docs/integration.md) §1, "Device identification".
+
+The review also needs *context*, in fixed fields rather than prose:
+each table row carries an `expected` summary in a fixed three-part
+shape (normal destinations / volume and timing / what it never does),
+and each event carries a counted `recent` block (window, counts, top
+and *new* destinations) plus a `baseline` block when the detector has
+history — or an explicit `"baseline": null` when it has none.
+Worked examples for DNS, IDS and minimal detectors are in
+[`docs/integration.md`](docs/integration.md) §1, "Event context".
+
 ### Canary probe: test the whole loop without opening a hole
 
 End-to-end testing needs a trigger a device can fire on demand — but a
@@ -127,6 +162,11 @@ Details and the staged procedure are in
    - `nextcloud.json`: copy `examples/nextcloud.example.json` (Talk credentials)
    - `llm.json`: copy `examples/llm.example.json`
    - `openai.key`: the API key itself, one line (see `examples/openai.key.example`)
+   - `device_profiles.json` (optional): the device table the LLM review
+     compares against — copy `examples/device_profiles.example.json`,
+     or generate a skeleton from a MAC→name registry with
+     `examples/make_device_profiles.py`, then fill in each device's
+     `expected` summary
    Then run `deploy.sh` as root: it installs everything, including the
    secret files with owner `root:<reader>` and mode `640`.
 4. Install the systemd units, `systemctl enable --now activeban activeban-verify`.

@@ -113,6 +113,150 @@ socket request is read as one message of at most 65,536 bytes.
   an ambiguous transport failure without checking `activeban.py status` or
   the daemon log, because a retry can extend a ban.
 
+### Device identification
+
+A detector may know a device by its MAC, by its IP, or by a
+human-assigned name — and for LLM inference it is best to send
+**everything known at once**, not one chosen identifier. Send a
+`device` object with any subset of the three fields (at least one is
+required):
+
+```json
+{"device": {"mac": "AA:BB:CC:DD:EE:FF", "ip": "192.168.1.50", "name": "Living room bulb"}}
+```
+
+When several fields are present they are cross-checked: if the MAC
+resolves to one device but the IP's owner at the event time is another,
+that disagreement is itself evidence (a stale DHCP mapping or possible
+spoofing) — it is logged and notified as a warning, and enforcement
+proceeds on the MAC.
+
+Resolution is mechanical and strictly ordered:
+
+1. **MAC** — exact match (normalized to uppercase). Always wins.
+2. **IP** — resolved to the MAC that held that IP **at the event time**,
+   using timestamped sources (DHCP lease/reservation table, ARP history,
+   a monitor's IP↔MAC history). Never resolve an IP through the
+   *current* mapping alone: DHCP addresses rot, and yesterday's IP may
+   be another device today.
+3. **Name** — normalized exact match only. Human-assigned names contain
+   typos, and the same name often exists on several devices (a set of
+   identical smart bulbs, for example); multiple exact matches are
+   *ambiguous*, not a match.
+
+Keep two kinds of identification separate:
+
+- **Enforcement identity**: a ban can only be applied to a MAC. An event
+  whose MAC cannot be determined must not be banned on a guessed MAC;
+  report it as a notification for human judgement instead.
+- **Profile identity** (context for the LLM review): if the enforcement
+  MAC is known but no device profile matches, or resolution above was
+  ambiguous, pass the candidate rows of the device table to the LLM and
+  let it infer the device from the clues available — the OUI vendor
+  implied by the MAC prefix, the DHCP hostname, the last IP, the device
+  type, the last-seen time, name similarity. An inferred identity is an
+  **estimate, not a fact**: notifications and logs must carry a warning
+  (for example `identity: inferred, unverified`), the review reason must
+  state the basis of the inference, and an inferred profile's "normal
+  behaviour" summary is weak evidence — a mismatch against it alone is
+  not a reason to keep a ban.
+
+Human-facing output (notifications, status displays) leads with the
+device **name** and shows MAC/IP secondarily: people cannot manage a
+fleet by MAC address. Internally nothing changes — profiles,
+`do_not_block`, cooldowns and enforcement all stay keyed by MAC.
+
+The device table itself is meant to be generated, not hand-maintained
+row by row: human-assigned names (authoritative), the operator's device
+classification, the router's DHCP reservation/lease table (a useful
+MAC↔IP↔hostname clue source, but stale, mistyped and duplicated entries
+do occur — a clue, not the truth), IP↔MAC history, and an OUI vendor
+table for the MAC prefix.
+
+### Event context: the device table, "normal", and "just now"
+
+The LLM review can only compare. It needs three things, and none of
+them works as free prose — an open-ended "describe the behaviour"
+field leaves every detector implementer guessing what to write. Use
+the fixed fields below and copy the closest worked example.
+
+**1. The device table ("who is this, normally").** One row per device,
+keyed by MAC, generated as described above. The free-text field is
+`expected`, and it has a fixed three-part shape — (a) normal
+destinations, (b) volume and timing, (c) what it never does:
+
+```json
+{"mac": "30:30:F9:00:00:01", "name": "Living room bulb", "type": "bulb",
+ "vendor": "SwitchBot",
+ "expected": "Destinations: vendor cloud (AWS) and NTP only. Volume: a few dozen queries/day, periodic traffic at night too. Never: connects to other LAN devices, long tunnel-like DNS names."}
+{"mac": "84:FC:E6:00:00:02", "name": "Entrance hub", "type": "hub",
+ "vendor": "SwitchBot",
+ "expected": "Destinations: vendor cloud, NTP. Volume: a few hundred queries/day including BLE relay traffic for child devices. Never: LAN scans, direct uploads to unknown hosts."}
+{"mac": "10:2C:B1:00:00:03", "name": "Camera base station", "type": "camera",
+ "vendor": "Eufy",
+ "expected": "Destinations: vendor cloud (video upload, also at night), NTP. Volume: bursty, large uploads on motion events. Never: connects to other LAN devices."}
+```
+
+**2. `recent` ("what just happened") — fixed fields, counted, not
+narrated.** Put it in `evidence`:
+
+| Field | Meaning |
+|---|---|
+| `window_seconds` | The observation window the counts cover. |
+| `counts` | Per-kind counts (queries, NX responses, connections, alerts…). |
+| `top_peers` | Top destinations (domains and/or IPs), at most 10, with counts. |
+| `new_peers` | Destinations **not** in the device's baseline. This is the field the review mostly judges by. |
+| `first_seen_peer_at` | When the newest destination was first seen, if known. |
+
+**3. `baseline` ("what is usual for this device")** — only a detector
+with history can compute this (a DNS monitor can; most others cannot).
+If you have none, send `"baseline": null` and say why in `reason`:
+an explicit "none" is not the same as a missing field, and the review
+treats insufficient context conservatively.
+
+Worked examples — copy the closest one and replace the numbers:
+
+DNS detector (with baseline):
+
+```json
+{"device": {"mac": "30:30:F9:00:00:01", "ip": "192.168.1.151", "name": "Living room bulb"},
+ "trigger": "behavior", "reason": "NX burst far above baseline",
+ "evidence": {
+   "recent": {"window_seconds": 1800, "counts": {"queries": 4120, "nx": 3980},
+     "top_peers": [{"domain": "a1b2.example-dyndns.net", "count": 3900}],
+     "new_peers": ["a1b2.example-dyndns.net"], "first_seen_peer_at": "2026-01-01T02:14:00+09:00"},
+   "baseline": {"period_days": 30, "queries_per_day_median": 48,
+     "top_domains": ["api.switch-bot.com", "pool.ntp.org"], "nx_rate": 0.01}}}
+```
+
+IDS detector (no baseline — stated explicitly):
+
+```json
+{"device": {"mac": "10:2C:B1:00:00:03", "ip": "192.168.1.60"},
+ "trigger": "behavior", "reason": "IDS signature matched; this detector keeps no per-device history, baseline: none",
+ "evidence": {
+   "recent": {"window_seconds": 60, "counts": {"alerts": 3},
+     "top_peers": [{"ip": "203.0.113.9", "port": 4444, "protocol": "tcp"}],
+     "new_peers": ["203.0.113.9"]},
+   "baseline": null,
+   "signature": "ET MALWARE Possible C2 Heartbeat"}}
+```
+
+Minimal event (log watcher, manual-style report — the floor, not the goal):
+
+```json
+{"device": {"ip": "192.168.1.77", "name": "garage plug"},
+ "trigger": "behavior", "reason": "repeated outbound connection attempts to a single new IP in the firewall log; no baseline available",
+ "evidence": {"recent": {"window_seconds": 600, "counts": {"connections": 240},
+   "top_peers": [{"ip": "198.51.100.23", "port": 8888, "protocol": "tcp"}],
+   "new_peers": ["198.51.100.23"]}, "baseline": null}}
+```
+
+A `reason` string alone, with no `recent`, is treated by the review as
+insufficient context: the ban stays and the case effectively waits for
+a human. Numbers and destination comparisons are what a verdict can
+be based on; a calm-sounding sentence is not.
+
 ### Reading the result
 
 The CLI prints one JSON object to stdout. **Check `ok`; do not rely only on
@@ -405,7 +549,44 @@ default) and retried on a later notification/flush.
 
 The verification service reads the API key from `api_key_file`, polls the
 daemon for pending machine bans, and sends its verdict through the socket.
-If the LLM call fails, the ban remains in place.
+If the LLM call fails, the ban remains in place. Optional keys:
+`lang` (overrides the policy language), `profiles_file` (path to the
+device profiles file, below).
+
+`device_profiles.json`:
+
+The device table the review compares against (see "Event context"
+above). Place the real file next to `deploy.sh` (it is listed in
+`.gitignore` — it contains the home's device inventory) and the deploy
+script installs it to `/etc/activeban/` for the verification user.
+Build a skeleton from an existing MAC→name registry with
+`examples/make_device_profiles.py`, then fill in `expected` by hand.
+Format: an object keyed by MAC (a list of row objects also works):
+
+```json
+{"AA:BB:CC:DD:EE:FF": {"name": "...", "type": "bulb", "vendor": "...",
+  "ip": "192.168.1.50", "expected": "Destinations: ... Volume: ... Never: ...",
+  "notes": "..."}}
+```
+
+For each pending ban the verification loop resolves the profile in
+this order — MAC exact match, then registered `ip` match, then
+registered `name` normalized exact match — and reports how it matched
+as `identity_source`. If nothing matches, it passes up to five
+candidate rows (same OUI prefix or similar name) for the LLM to infer
+from; the review prompt treats inferred identity as weak evidence.
+The loop also attaches the device's ban/release history (kept by the
+daemon, most recent 20 events) as counts plus the last few entries.
+A verdict may set `"history_based": true` when it releases on the
+basis of a repeated human-release pattern; the daemon then marks the
+release notification with a warning asking the human to confirm.
+
+Reports may carry the device identifiers as one object
+(`"device": {"mac": ..., "ip": ..., "name": ...}` in the JSON-stdin
+form, or `--name` on the CLI). A report whose MAC cannot be
+determined is **not** banned: the daemon logs `report_unresolved`,
+notifies the human, and returns
+`{"ok": false, "error": "identity unresolved: no mac to enforce"}`.
 
 ### Main environment variables
 
@@ -418,6 +599,7 @@ If the LLM call fails, the ban remains in place.
 | `ACTIVEBAN_NC_CONF` | `/etc/activeban/nextcloud.json` |
 | `ACTIVEBAN_LLM_CONF` | `/etc/activeban/llm.json` |
 | `ACTIVEBAN_SPOOL` | `/var/lib/activeban/spool.jsonl` |
+| `ACTIVEBAN_PROFILES` | `/etc/activeban/device_profiles.json` |
 | `ACTIVEBAN_TARGET_CONF` | `/etc/activeban/fw-target.conf` (enforcement examples) |
 
 ---

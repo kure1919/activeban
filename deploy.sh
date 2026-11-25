@@ -55,6 +55,10 @@ install_secret() {
 install_secret nextcloud.json examples/nextcloud.example.json quarantine
 install_secret llm.json examples/llm.example.json qllm
 install_secret openai.key examples/openai.key.example qllm
+# Device profiles are read by the verification loop (qllm). Not a secret,
+# but installed through the same path: place device_profiles.json next to
+# deploy.sh (build a skeleton with examples/make_device_profiles.py).
+install_secret device_profiles.json examples/device_profiles.example.json qllm
 
 echo "== installed =="
 echo "daemon : systemctl enable --now activeban"

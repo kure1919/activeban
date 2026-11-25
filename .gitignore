@@ -7,3 +7,4 @@ nextcloud.json
 llm.json
 *.key
 fw-target.conf
+device_profiles.json
