@@ -520,6 +520,7 @@ names `activeban-ban` and `activeban-release`.
 | `do_not_block` | MAC addresses refused for every role. |
 | `cooldown_hours` | Cooldown after an LLM or human release. |
 | `default_ttl_seconds` | Ban lifetime when an event/manual ban does not supply one. |
+| `min_ttl_seconds`, `max_ttl_seconds` | Clamp applied to every supplied TTL (defaults 60 and 604800). A detector cannot create a near-zero or effectively permanent ban. |
 | `flap_threshold` | Number of releases after which a device is held for human judgement. |
 | `ban_cmd`, `release_cmd` | Enforcement executable paths. |
 | `role_users` | Map of local usernames to `machine` or `llm`. Root is always `human`. |

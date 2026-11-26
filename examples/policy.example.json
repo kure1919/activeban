@@ -19,5 +19,7 @@
   "behavior": "normal",
   "intel": "high",
   "manual": "manual"
- }
+ },
+ "min_ttl_seconds": 60,
+ "max_ttl_seconds": 604800
 }

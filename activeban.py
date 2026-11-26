@@ -232,13 +232,26 @@ class Talker:
         if not items:
             return
         if len(items) == 1:
+            batch = items
             body = items[0]["text"]
         else:
+            batch = items[:20]
             body = (self.msg["spool_flush"].format(count=len(items)) +
-                    "\n---\n".join(i["text"] for i in items[:20]))
+                    "\n---\n".join(i["text"] for i in batch))
         if self._post(body):
-            os.unlink(SPOOL_PATH)
-            self.log.write("talk_flushed", count=len(items))
+            # 送れた分だけを取り除く。残りは書き戻して次回に送る
+            # （以前はファイルごと消していたため 21 件目以降が欠落した）。
+            rest = items[len(batch):]
+            if rest:
+                tmp = SPOOL_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    for i in rest:
+                        f.write(json.dumps(i, ensure_ascii=False) + "\n")
+                os.replace(tmp, SPOOL_PATH)
+            else:
+                os.unlink(SPOOL_PATH)
+            self.log.write("talk_flushed", count=len(batch),
+                           remaining=len(rest))
 
     def flush(self):
         # tick（5秒間隔）からの定期 flush は最大で60秒に1回だけ試す
@@ -303,7 +316,17 @@ class Daemon:
         tclass = self.policy.get("trigger_classes", {}).get(trigger, "normal")
         rec = st.data["bans"].get(mac)
         if rec:  # 重複バンは TTL 延長として扱う
-            rec["expires_at"] = max(rec["expires_at"], now() + ttl)
+            new_exp = max(rec["expires_at"], now() + ttl)
+            # 執行側が自前で TTL を持つ方式（nft の timeout 等）では、
+            # state だけ伸ばすと実物が先に切れて乖離する。延長分で
+            # BAN コマンドを再実行して執行側の期限も揃える。再実行が
+            # 冪等でない方式でも、既存ルールの再追加はチェック付き
+            # no-op になる想定（fw.d の各ペアの契約）。
+            if not self.fw.ban(mac, ip or rec.get("ip", ""),
+                               int(new_exp - now())):
+                self.log.write("ban_extend_failed", mac=mac, origin=origin)
+                return {"ok": False, "error": "enforcement command failed"}
+            rec["expires_at"] = new_exp
             rec["reason"] = reason
             self.log.write("ban_extend", mac=mac, origin=origin,
                            expires_at=rec["expires_at"])
@@ -454,7 +477,15 @@ class Daemon:
                                    trigger_class=tclass, cooldown_class=cls)
                     return {"ok": False,
                             "error": f"cooldown ({cls}) until {rec['until']}"}
-        ttl = int(msg.get("ttl") or self.policy.get("default_ttl_seconds", 21600))
+        try:
+            ttl = int(msg.get("ttl") or
+                      self.policy.get("default_ttl_seconds", 21600))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "bad ttl"}
+        # 検知器の申告 TTL はそのまま信用しない。policy の範囲に丸める
+        # （巨大 TTL による事実上の恒久 BAN と、短すぎる無意味な BAN の防止）。
+        ttl = max(int(self.policy.get("min_ttl_seconds", 60)),
+                  min(ttl, int(self.policy.get("max_ttl_seconds", 604800))))
         res = self._do_ban(mac, ip, role, msg.get("reason", ""),
                            trigger, ttl, msg.get("evidence"),
                            device=reported_device)
