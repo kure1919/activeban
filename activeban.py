@@ -38,6 +38,11 @@ SOCK_PATH = os.environ.get("ACTIVEBAN_SOCK", "/run/activeban/activeban.sock")
 NC_CONF = os.environ.get("ACTIVEBAN_NC_CONF", "/etc/activeban/nextcloud.json")
 LLM_CONF = os.environ.get("ACTIVEBAN_LLM_CONF", "/etc/activeban/llm.json")
 SPOOL_PATH = os.environ.get("ACTIVEBAN_SPOOL", "/var/lib/activeban/spool.jsonl")
+# ソケットプロトコル: 要求・応答とも JSON 1 行＋改行でフレーミングする。
+# JSON 自体に終端記号は無いので、改行を区切りとする規約を両方向で統一した
+# （旧来の無区切り一発 recv は廃止。互換フォールバックは持たない）。
+MAX_MSG_BYTES = 1024 * 1024
+SOCK_RECV_TIMEOUT = 10
 PROFILES_PATH = os.environ.get("ACTIVEBAN_PROFILES",
                                "/etc/activeban/device_profiles.json")
 
@@ -275,7 +280,17 @@ class State:
         tmp = STATE_PATH + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self.data, f, ensure_ascii=False, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, STATE_PATH)
+        # replace の永続化にはディレクトリ側の fsync が要る。これが無いと
+        # 電源断で save が巻き戻り、state の知らない BAN ルールが執行側に
+        # 孤児として残り得る（TTL 処理は state 駆動のため）。
+        dfd = os.open(os.path.dirname(STATE_PATH) or ".", os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
 
 
 def role_of(uid, policy):
@@ -614,8 +629,16 @@ def serve(policy):
         if conn is not None:
             with conn:
                 try:
-                    data = conn.recv(65536)
-                    msg = json.loads(data.decode())
+                    conn.settimeout(SOCK_RECV_TIMEOUT)
+                    data = b""
+                    while b"\n" not in data:
+                        if len(data) > MAX_MSG_BYTES:
+                            raise ValueError("message too large")
+                        chunk = conn.recv(65536)
+                        if not chunk:
+                            break
+                        data += chunk
+                    msg = json.loads(data.split(b"\n", 1)[0].decode())
                     role = role_of(peer_uid(conn), policy)
                     res = daemon.handle(role, msg)
                 except Exception as e:
@@ -630,14 +653,18 @@ def serve(policy):
 
 def call(msg):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(30)
     s.connect(SOCK_PATH)
-    s.sendall(json.dumps(msg).encode())
+    s.sendall(json.dumps(msg).encode() + b"\n")
     data = b""
     while not data.endswith(b"\n"):
         chunk = s.recv(65536)
         if not chunk:
             break
         data += chunk
+        if len(data) > MAX_MSG_BYTES:
+            s.close()
+            raise ValueError("response too large")
     s.close()
     return json.loads(data.decode())
 
@@ -679,12 +706,15 @@ def verify_system_prompt(lang):
         "is not grounds to keep. If you infer the device's identity "
         "from candidates, state the inference and its basis in the "
         "reason.\n"
-        "4. History is precedent, not permission. If history.counts "
-        "shows the human repeatedly released bans of this same "
-        "device for the same trigger pattern, you may release on that "
+        "4. History is precedent, not permission. history.by_trigger "
+        "holds daemon-computed counts per trigger (use them as given; "
+        "do not recount the raw list). If by_trigger for the current "
+        "trigger shows the human repeatedly released bans of this "
+        "same device for that same trigger, you may release on that "
         "basis; then set history_based to true and cite the counts in "
-        "the reason. If the current event differs in destination or "
-        "kind from the released pattern, judge it as new.\n"
+        "the reason. Releases under other triggers are not precedent "
+        "for this event. If the current event differs in destination "
+        "or kind from the released pattern, judge it as new.\n"
         "5. Canary: if trigger is canary and evidence.canary_domain "
         "is canary.activeban.invalid or a subdomain of it, the probe "
         "is a deliberate health check by the operator: release.\n"
@@ -752,19 +782,43 @@ def resolve_profile(profiles, mac, ip, name):
 
 
 def summarize_history(history):
+    """履歴の集計はデーモン側で決定的に行う（LLM に数えさせない）。
+
+    プロンプトの規則 4 は「同じ trigger パターンの繰り返し解除」を
+    前例として認めるので、解除は trigger 別にも数える。release 側に
+    trigger が無い旧形式の履歴は、直前の ban の trigger で補う。
+    """
     counts = {"bans": 0, "releases_by_human": 0, "releases_by_llm": 0,
               "keeps": 0}
+    by_trigger = {}
+    last_ban_trigger = ""
     for h in history:
         if h.get("event") == "ban":
             counts["bans"] += 1
+            last_ban_trigger = h.get("trigger", "") or last_ban_trigger
+            if last_ban_trigger:
+                by_trigger.setdefault(
+                    last_ban_trigger,
+                    {"bans": 0, "releases_by_human": 0,
+                     "releases_by_llm": 0})["bans"] += 1
         elif h.get("event") == "release":
+            trig = h.get("trigger", "") or last_ban_trigger
             if h.get("by") == "human":
                 counts["releases_by_human"] += 1
+                if trig:
+                    by_trigger.setdefault(
+                        trig, {"bans": 0, "releases_by_human": 0,
+                               "releases_by_llm": 0})["releases_by_human"] += 1
             elif h.get("by") == "llm":
                 counts["releases_by_llm"] += 1
+                if trig:
+                    by_trigger.setdefault(
+                        trig, {"bans": 0, "releases_by_human": 0,
+                               "releases_by_llm": 0})["releases_by_llm"] += 1
         elif h.get("event") == "verdict_keep":
             counts["keeps"] += 1
-    return {"counts": counts, "recent": history[-5:]}
+    return {"counts": counts, "by_trigger": by_trigger,
+            "recent": history[-5:]}
 
 
 def verify_loop(once=False):
