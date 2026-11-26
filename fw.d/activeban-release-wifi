@@ -4,17 +4,27 @@
 # Removing a MAC that is not in the deny ACL is success (idempotent).
 # Target settings live in /etc/activeban/fw-target.conf:
 #   FW_HOST / FW_USER / FW_KEY, optional WIFI_IFACES (default: "wlan0 wlan1")
+#
+# Success still requires proof the control channel works: hostapd_cli
+# must answer PONG on every interface. DEL_MAC's own reply is not used
+# as the verdict, because "not in the ACL" (the desired end state) and
+# a dead control channel both surface as FAIL there; the PING separates
+# them. (An earlier version appended "; true" and reported success
+# unconditionally.)
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
 . "$CONF"
 MAC="$(echo "$1" | tr 'A-F' 'a-f')"
+echo "$MAC" | grep -Eq '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' \
+  || { echo "bad mac: $1" >&2; exit 64; }
 IFACES="${WIFI_IFACES:-wlan0 wlan1}"
 FAILED=0
 for IF in $IFACES; do
-  ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  OUT="$(ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
     "$FW_USER@$FW_HOST" -- \
-    "hostapd_cli -i $IF deny_acl DEL_MAC $MAC >/dev/null 2>&1; true" \
-    || FAILED=1
+    "P=\$(hostapd_cli -i $IF ping 2>/dev/null); [ \"\$P\" = PONG ] || exit 3; hostapd_cli -i $IF deny_acl DEL_MAC $MAC >/dev/null 2>&1; echo OK" \
+    2>/dev/null)" || OUT=""
+  [ "$OUT" = "OK" ] || FAILED=1
 done
 [ "$FAILED" -eq 0 ]

@@ -2,17 +2,19 @@
 # activeban external command: webhook (RELEASE).
 # Contract: arguments = MAC IP; exit 0 = success, non-zero = failure.
 # Target settings live in /etc/activeban/fw-target.conf:
-#   WEBHOOK_RELEASE_URL  URL POSTed to when a ban is released
 #   WEBHOOK_BAN_URL      URL POSTed to when a ban takes effect (ban pair)
+#   WEBHOOK_RELEASE_URL  URL POSTed to when a ban is released
 #   WEBHOOK_HEADER       optional, one extra header line, e.g.
-#                        "Authorization: Bearer TOKEN"
+#                        "Authorization: Bearer <redacted>"
 #
 # The request body is JSON:
 #   {"action": "release", "mac": "...", "ip": "..."}
 #
-# See activeban-ban-webhook for the design notes. A failed release
-# (HTTP status >= 400, unreachable host) exits non-zero; the daemon
-# then keeps the ban in its state so the release can be retried.
+# Notes mirror the ban pair: the body is built with python3's json
+# module; WEBHOOK_HEADER travels in a mode-600 curl config file, not
+# on the command line; HTTP >= 400 is failure (curl -f); redirects are
+# not followed; an HTTP success cannot prove the far end released
+# anything - that is the endpoint's contract.
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
@@ -23,13 +25,23 @@ if [ "$#" -ne 2 ]; then
   exit 64
 fi
 MAC="$1"
-IP="$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+IP="$2"
+echo "$MAC" | grep -Eq '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$' \
+  || { echo "bad mac: $MAC" >&2; exit 64; }
 
-BODY="{\"action\": \"release\", \"mac\": \"$MAC\", \"ip\": \"$IP\"}"
+BODY="$(AB_ACTION=release AB_MAC="$MAC" AB_IP="$IP" \
+  python3 -c 'import json, os; print(json.dumps({"action": os.environ["AB_ACTION"], "mac": os.environ["AB_MAC"], "ip": os.environ["AB_IP"]}))')"
 
 if [ -n "${WEBHOOK_HEADER:-}" ]; then
-  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
-    -H "$WEBHOOK_HEADER" -d "$BODY" "$WEBHOOK_RELEASE_URL" >/dev/null
+  CURL_CONF="$(mktemp)"
+  chmod 600 "$CURL_CONF"
+  trap 'rm -f "$CURL_CONF"' EXIT
+  printf 'header = "%s"\n' \
+    "$(printf '%s' "$WEBHOOK_HEADER" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')" \
+    > "$CURL_CONF"
+  curl -fsS -m 10 -K "$CURL_CONF" -X POST \
+    -H 'Content-Type: application/json' \
+    -d "$BODY" "$WEBHOOK_RELEASE_URL" >/dev/null
 else
   curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
     -d "$BODY" "$WEBHOOK_RELEASE_URL" >/dev/null

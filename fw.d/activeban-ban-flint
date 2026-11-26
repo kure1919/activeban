@@ -13,12 +13,21 @@
 # （rc.local 等で上記を再投入）が別途必要。
 # TTL は nft の element timeout にそのまま渡す（デーモン側の TTL と二重管理に
 # なるが、片方が死んでももう片方が解除する安全側の冗長）。
+#
+# 延長は delete → add で行う。既存要素への add element はカーネル 6.12
+# 未満では timeout が更新されない既知の挙動があり、Flint のカーネルは
+# 対象になるため、再追加だけでは延長が空振りする。
+# 成否はコマンドの終了コードではなく、実行後に set を一覧して MAC が
+# 実在することで判定する。
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
 . "$CONF"
 MAC="$(echo "$1" | tr 'A-F' 'a-f')"
+echo "$MAC" | grep -Eq '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' \
+  || { echo "bad mac: $1" >&2; exit 64; }
 TTL="$3"
+case "$TTL" in *[!0-9]* | "") echo "bad ttl: $TTL" >&2; exit 64 ;; esac
 ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
   "$FW_USER@$FW_HOST" -- \
-  nft add element inet activeban quarantine "{ $MAC timeout ${TTL}s }"
+  "nft delete element inet activeban quarantine '{ $MAC }' 2>/dev/null; nft add element inet activeban quarantine '{ $MAC timeout ${TTL}s }' && nft list set inet activeban quarantine | grep -q '$MAC'"

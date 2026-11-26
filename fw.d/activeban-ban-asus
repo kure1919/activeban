@@ -5,18 +5,32 @@
 #   FW_HOST=192.168.1.1
 #   FW_USER=admin
 #   FW_KEY=/etc/activeban/router_key
+#   ASUS_IPV6=auto|require|off   （省略時 auto）
 # TTL は iptables 側では使わない（期限管理は activeban デーモンの役目）。
+#
+# ルールは FORWARD 直下ではなく専用チェーン activeban に入れる（手動設定や
+# 他の仕組みのルールと混ざらないように）。IPv6 は ip6tables 側にも同じ
+# チェーンを作る: auto = バイナリがあれば必須、無ければ v4 のみで成功 /
+# require = 無ければ失敗 / off = v6 を触らない。
+# 成否は投入後の -C 確認で判定する（-C の成功は「ルールが実在する」
+# ことと等しいので、ban 側では終了コードで判定してよい）。
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
 . "$CONF"
 MAC="$1"
-# 重複投入で二重に積まないよう、既存ルールがあれば成功扱いで終わる
-if ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-     "$FW_USER@$FW_HOST" -- \
-     iptables -C FORWARD -m mac --mac-source "$MAC" -j DROP 2>/dev/null; then
-  exit 0
-fi
-ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
-  "$FW_USER@$FW_HOST" -- \
-  iptables -I FORWARD -m mac --mac-source "$MAC" -j DROP
+echo "$MAC" | grep -Eq '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$' \
+  || { echo "bad mac: $1" >&2; exit 64; }
+SSH="ssh -i $FW_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes $FW_USER@$FW_HOST --"
+
+ban_family() {
+  T="$1"
+  $SSH "$T -N activeban 2>/dev/null; $T -C FORWARD -j activeban >/dev/null 2>&1 || $T -I FORWARD -j activeban; $T -C activeban -m mac --mac-source $MAC -j DROP >/dev/null 2>&1 || $T -A activeban -m mac --mac-source $MAC -j DROP; $T -C activeban -m mac --mac-source $MAC -j DROP >/dev/null"
+}
+
+ban_family iptables
+case "${ASUS_IPV6:-auto}" in
+  off) ;;
+  require) ban_family ip6tables ;;
+  *) if $SSH "command -v ip6tables >/dev/null"; then ban_family ip6tables; fi ;;
+esac

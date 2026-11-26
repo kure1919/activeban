@@ -11,17 +11,26 @@
 # - It only affects clients associated with this AP. A client that roams to
 #   another vendor's mesh node is outside this command's reach.
 # - TTL is managed by the activeban daemon; hostapd has no per-entry TTL here.
+# - Success is judged from hostapd_cli's replies, never assumed: the
+#   control channel must answer PONG and deny_acl ADD_MAC must answer OK.
+#   (An earlier version appended "; true" and discarded all output, which
+#   reported success even when hostapd was down or the ACL add failed.)
+# - If one interface fails, the rest are still attempted; the pair as a
+#   whole reports failure, and a later release cleans up partial state.
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
 . "$CONF"
 MAC="$(echo "$1" | tr 'A-F' 'a-f')"
+echo "$MAC" | grep -Eq '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' \
+  || { echo "bad mac: $1" >&2; exit 64; }
 IFACES="${WIFI_IFACES:-wlan0 wlan1}"
 FAILED=0
 for IF in $IFACES; do
-  ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  OUT="$(ssh -i "$FW_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes \
     "$FW_USER@$FW_HOST" -- \
-    "hostapd_cli -i $IF deny_acl ADD_MAC $MAC >/dev/null 2>&1; hostapd_cli -i $IF deauthenticate $MAC >/dev/null 2>&1; true" \
-    || FAILED=1
+    "P=\$(hostapd_cli -i $IF ping 2>/dev/null); [ \"\$P\" = PONG ] || exit 3; A=\$(hostapd_cli -i $IF deny_acl ADD_MAC $MAC 2>/dev/null); [ \"\$A\" = OK ] || exit 4; hostapd_cli -i $IF deauthenticate $MAC >/dev/null 2>&1; echo OK" \
+    2>/dev/null)" || OUT=""
+  [ "$OUT" = "OK" ] || FAILED=1
 done
 [ "$FAILED" -eq 0 ]

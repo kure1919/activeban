@@ -3,13 +3,20 @@
 # Contract: arguments = MAC IP; exit 0 = success, non-zero = failure.
 # A missing element is success (idempotent), including an element that
 # already expired through its nft timeout. Target settings: fw-target.conf.
+#
+# The verdict comes from the post-state, not from exit codes along the
+# way: the set must be listable (a listing failure is a real failure,
+# not "already gone"), and after the delete the MAC must be absent
+# from the set listing.
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
 . "$CONF"
 MAC="$(echo "$1" | tr 'A-F' 'a-f')"
+echo "$MAC" | grep -Eq '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$' \
+  || { echo "bad mac: $1" >&2; exit 64; }
 SSH="ssh -i $FW_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes $FW_USER@$FW_HOST --"
 # Establish reachability first so an SSH failure is not mistaken for an
 # already-expired element.
 $SSH true
-$SSH "if nft list element inet activeban quarantine '{ $MAC }' >/dev/null 2>&1; then nft delete element inet activeban quarantine '{ $MAC }'; fi"
+$SSH "nft list set inet activeban quarantine >/dev/null && { nft delete element inet activeban quarantine '{ $MAC }' 2>/dev/null; ! nft list set inet activeban quarantine | grep -q '$MAC'; }"

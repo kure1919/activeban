@@ -2,15 +2,46 @@
 # activeban external command: release an ASUS router iptables ban
 # Contract: arguments = MAC IP; exit 0 = success, non-zero = failure.
 # A missing rule is success (idempotent). Target settings: fw-target.conf.
+#   ASUS_IPV6=auto|require|off   (default auto, same meaning as the ban pair)
+#
+# Rules are removed from the dedicated activeban chain, and also from
+# FORWARD directly (leftovers from versions that inserted there).
+# Deletion is attempted at most 3 times per location: a delete that
+# reports success while the rule persists must not loop forever - the
+# listing verdict below then reports the failure.
+# The verdict comes from the post-state: after deleting, the full rule
+# listing must no longer mention the MAC. An existence check's exit
+# code cannot tell "rule absent" from "iptables errored", so it is
+# never used as the verdict. (An earlier version treated a failed -C
+# as "already released", which could report success with the ban
+# still in place.)
 set -eu
 CONF="${ACTIVEBAN_TARGET_CONF:-/etc/activeban/fw-target.conf}"
 # shellcheck disable=SC1090
 . "$CONF"
 MAC="$1"
+echo "$MAC" | grep -Eq '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$' \
+  || { echo "bad mac: $1" >&2; exit 64; }
 SSH="ssh -i $FW_KEY -o BatchMode=yes -o StrictHostKeyChecking=yes $FW_USER@$FW_HOST --"
 # Establish that the router is reachable before treating a missing rule as
 # "already released"; otherwise an SSH failure would look like success.
 $SSH true
-if $SSH iptables -C FORWARD -m mac --mac-source "$MAC" -j DROP 2>/dev/null; then
-  $SSH iptables -D FORWARD -m mac --mac-source "$MAC" -j DROP
-fi
+
+FAILED=0
+release_family() {
+  T="$1"
+  # Deletion itself is best-effort; the listing below is the verdict.
+  $SSH "for i in 1 2 3; do $T -C activeban -m mac --mac-source $MAC -j DROP >/dev/null 2>&1 || break; $T -D activeban -m mac --mac-source $MAC -j DROP; done; for i in 1 2 3; do $T -C FORWARD -m mac --mac-source $MAC -j DROP >/dev/null 2>&1 || break; $T -D FORWARD -m mac --mac-source $MAC -j DROP; done" || true
+  LIST="$($SSH "$T -S")"
+  if echo "$LIST" | grep -iF -- "--mac-source $MAC" >/dev/null; then
+    FAILED=1
+  fi
+}
+
+release_family iptables
+case "${ASUS_IPV6:-auto}" in
+  off) ;;
+  require) release_family ip6tables ;;
+  *) if $SSH "command -v ip6tables >/dev/null"; then release_family ip6tables; fi ;;
+esac
+[ "$FAILED" -eq 0 ]
