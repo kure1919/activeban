@@ -112,3 +112,11 @@ element timeout, so expiry does not depend on the daemon being alive).
   fills that role.
 - Not a guarantee. A determined attacker already inside the LAN is out of
   scope; this is a first-response system for commodity IoT compromise.
+- Device identity is MAC-keyed, and MACs are not proof of identity.
+  Modern phones randomize MAC addresses (per-network by default, which
+  keeps a home device stable on your own SSID, but it is still not an
+  identity guarantee), and a device already on the LAN can spoof
+  another device's MAC. Attribution and enforcement inherit that
+  limit. An attacker who spoofs MACs to evade or redirect bans is an
+  active, targeted adversary — beyond the design limits of this
+  system, in the same way as the item above.
