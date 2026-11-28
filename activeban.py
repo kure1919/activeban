@@ -455,6 +455,22 @@ class Daemon:
             self.state.save()
             self.log.write("unhold", mac=mac)
             return {"ok": True}
+        if cmd == "reverify":
+            # 人間だけが要求できる再検証。判定済みフラグを外して
+            # pending に戻し、検証ループに拾い直させる。プロンプトや
+            # プロファイルを直した後に、同じバンで効き目を確認する用。
+            if role != "human":
+                return {"ok": False, "error": "human only"}
+            mac = norm_mac(msg.get("mac", ""))
+            rec = self.state.data["bans"].get(mac or "")
+            if not rec:
+                return {"ok": False, "error": "not banned"}
+            if rec["origin"] != "machine":
+                return {"ok": False, "error": "only machine bans are verified"}
+            rec["verified"] = None
+            self.state.save()
+            self.log.write("reverify_requested", mac=mac)
+            return {"ok": True, "result": "reverify queued"}
         return {"ok": False, "error": f"unknown cmd {cmd}"}
 
     def _cmd_ban(self, role, msg, cmd):
@@ -972,6 +988,8 @@ def main():
     sub.add_parser("status")
     p = sub.add_parser("unhold")
     p.add_argument("mac")
+    p = sub.add_parser("reverify")
+    p.add_argument("mac")
     args = ap.parse_args()
 
     if args.sub == "serve":
@@ -999,7 +1017,7 @@ def main():
                           "evidence", "device"):
                     if ev.get(k) is not None:
                         msg[k] = ev[k]
-    elif args.sub in ("release", "unhold"):
+    elif args.sub in ("release", "unhold", "reverify"):
         msg["mac"] = args.mac
         if args.sub == "release":
             msg["reason"] = args.reason

@@ -378,6 +378,7 @@ Commands implemented by the daemon are:
 | `pending` | `llm`, `human` | List machine bans awaiting verification. |
 | `status` | any recognized role | Return bans, cooldowns, and holds. |
 | `unhold` | `human` | Clear a hold and cooldowns for a MAC. |
+| `reverify` | `human` | Return a judged machine ban to `pending` so the verify loop judges it again (e.g. after a prompt or profile fix). |
 
 Including `"role":"human"` in a request has no effect. Authority comes only
 from the connecting process's UID.
