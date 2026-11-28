@@ -57,50 +57,50 @@ SEVERITY = {"test": 0, "normal": 1, "high": 2, "manual": 3}
 MESSAGES = {
     "ja": {
         "spool_flush": "[activeban] 滞留していた通知 {count} 件\n",
-        "hold": ("[activeban] {mac} は解除が {count} 回繰り返されたため"
+        "hold": ("[activeban] {label} は解除が {count} 回繰り返されたため"
                  "自動応答を停止しました。人間の判断をお願いします。"),
-        "banned": ("[activeban] 自動バンしました: {mac} (ip={ip}) "
+        "banned": ("[activeban] 自動バンしました: {label} (ip={ip}) "
                    "trigger={trigger} reason={reason}。LLM 検証を待ちます。"),
-        "released": ("[activeban] 解除しました: {mac} (by {role}) "
+        "released": ("[activeban] 解除しました: {label} (by {role}) "
                      "元のバン: origin={origin} reason={reason}"),
-        "verdict_release": ("[activeban] LLM 検証で誤報と判定し解除しました: {mac}\n"
+        "verdict_release": ("[activeban] LLM 検証で誤報と判定し解除しました: {label}\n"
                             "検知理由: {detected}\n解除理由: {reason}"),
         "verdict_release_history": ("[activeban] 【警告・要確認】過去の解除パターンに基づき "
-                            "LLM が解除しました: {mac}\n"
+                            "LLM が解除しました: {label}\n"
                             "検知理由: {detected}\n解除理由: {reason}\n"
                             "履歴に基づく解除です。人の確認をお願いします。"),
         "unresolved": ("[activeban] MAC が確定できない検知報告がありました"
                        "（バンはしていません）: ip={ip} name={name} "
                        "trigger={trigger} reason={reason}。人間の判断をお願いします。"),
-        "verdict_keep": ("[activeban] LLM 検証でも危険と判定し遮断を継続します: {mac}\n"
+        "verdict_keep": ("[activeban] LLM 検証でも危険と判定し遮断を継続します: {label}\n"
                          "検知理由: {detected}\n継続理由: {reason}\n"
                          "TTL 満了 {expires} に自動解除されます。人の判断も可能です。"),
-        "ttl_expired": "[activeban] TTL 満了で自動解除しました: {mac} (origin={origin})",
+        "ttl_expired": "[activeban] TTL 満了で自動解除しました: {label} (origin={origin})",
     },
     "en": {
         "spool_flush": "[activeban] {count} queued notification(s)\n",
-        "hold": ("[activeban] {mac}: automatic response stopped after "
+        "hold": ("[activeban] {label}: automatic response stopped after "
                  "{count} repeated releases. Human judgement requested."),
-        "banned": ("[activeban] Auto-banned: {mac} (ip={ip}) "
+        "banned": ("[activeban] Auto-banned: {label} (ip={ip}) "
                    "trigger={trigger} reason={reason}. Awaiting LLM review."),
-        "released": ("[activeban] Released: {mac} (by {role}) "
+        "released": ("[activeban] Released: {label} (by {role}) "
                      "original ban: origin={origin} reason={reason}"),
         "verdict_release": ("[activeban] LLM review judged this a false positive "
-                            "and released it: {mac}\n"
+                            "and released it: {label}\n"
                             "Detection reason: {detected}\nRelease reason: {reason}"),
         "verdict_release_history": ("[activeban] [WARNING - please confirm] The LLM "
-                            "released this ban based on past release patterns: {mac}\n"
+                            "released this ban based on past release patterns: {label}\n"
                             "Detection reason: {detected}\nRelease reason: {reason}\n"
                             "This release is history-based. Human confirmation requested."),
         "unresolved": ("[activeban] A detection report could not be resolved to a MAC "
                        "(no ban applied): ip={ip} name={name} "
                        "trigger={trigger} reason={reason}. Human judgement requested."),
         "verdict_keep": ("[activeban] LLM review judged this dangerous; "
-                         "ban kept: {mac}\n"
+                         "ban kept: {label}\n"
                          "Detection reason: {detected}\nKeep reason: {reason}\n"
                          "Released automatically at TTL expiry {expires}. "
                          "A human may override at any time."),
-        "ttl_expired": "[activeban] Released by TTL expiry: {mac} (origin={origin})",
+        "ttl_expired": "[activeban] Released by TTL expiry: {label} (origin={origin})",
     },
 }
 
@@ -118,6 +118,13 @@ def norm_mac(mac):
     if not isinstance(mac, str) or not MAC_RE.match(mac.strip()):
         return None
     return mac.strip().upper()
+
+
+def device_label(mac, name):
+    """通知の主語。人向け表示は名前を先頭にし、MAC も併記する
+    （名前だけでは操作できないし、MAC だけでは誰か分からない）。"""
+    name = (name or "").strip()
+    return "%s [%s]" % (name, mac) if name else mac
 
 
 def load_json(path, default):
@@ -405,7 +412,10 @@ class Daemon:
                 "since": now(), "reason": f"release repeated {count} times"}
             self.log.write("hold_set", mac=mac, count=count)
             self.talker.notify(
-                self.msg["hold"].format(mac=mac, count=count))
+                self.msg["hold"].format(
+                    label=device_label(
+                        mac, (rec.get("device") or {}).get("name")),
+                    count=count))
         self.state.save()
 
     # --- コマンド処理（role は SO_PEERCRED 由来） ---
@@ -507,8 +517,8 @@ class Daemon:
         if res.get("result") == "banned" and role == "machine":
             self.talker.notify(
                 self.msg["banned"].format(
-                    mac=mac, ip=ip, trigger=trigger,
-                    reason=msg.get("reason", "")))
+                    label=device_label(mac, name), ip=ip,
+                    trigger=trigger, reason=msg.get("reason", "")))
         return res
 
     def _cmd_release(self, role, msg):
@@ -528,7 +538,9 @@ class Daemon:
             self._set_cooldown(mac, rec, role)
             self.talker.notify(
                 self.msg["released"].format(
-                    mac=mac, role=role, origin=rec["origin"],
+                    label=device_label(
+                        mac, (rec.get("device") or {}).get("name")),
+                    role=role, origin=rec["origin"],
                     reason=rec["reason"]))
         return res
 
@@ -554,7 +566,9 @@ class Daemon:
                             else "verdict_release")
                 self.talker.notify(
                     self.msg[template].format(
-                        mac=mac, detected=rec["reason"], reason=reason))
+                        label=device_label(
+                            mac, (rec.get("device") or {}).get("name")),
+                        detected=rec["reason"], reason=reason))
             return res
         if verdict == "keep":
             rec["verified"] = {"by": "llm", "at": now(), "reason": reason}
@@ -564,7 +578,9 @@ class Daemon:
             self.log.write("verdict_keep", mac=mac, reason=reason)
             self.talker.notify(
                 self.msg["verdict_keep"].format(
-                    mac=mac, detected=rec["reason"], reason=reason,
+                    label=device_label(
+                        mac, (rec.get("device") or {}).get("name")),
+                    detected=rec["reason"], reason=reason,
                     expires=rec["expires_at"]))
             return {"ok": True, "result": "kept"}
         return {"ok": False, "error": "bad verdict"}
@@ -581,7 +597,10 @@ class Daemon:
             if res.get("ok"):
                 self.talker.notify(
                     self.msg["ttl_expired"].format(
-                        mac=mac, origin=rec["origin"] if rec else "?"))
+                        label=device_label(
+                            mac, ((rec or {}).get("device")
+                                  or {}).get("name")),
+                        origin=rec["origin"] if rec else "?"))
         # クールダウンの掃除
         for mac in list(st.data["cooldowns"]):
             cd = st.data["cooldowns"][mac]
@@ -686,7 +705,8 @@ def verify_system_prompt(lang):
         "for this device).\n"
         "Rules:\n"
         "1. Judge by COMPARISON, not by how the reason sounds. "
-        "Compare evidence.recent (especially new_peers) against "
+        "Compare evidence.recent (new_peers, top_new_domains, "
+        "counts) against "
         "device.profile.expected and evidence.baseline.top_domains. "
         "Activity inside the device's normal set is a false positive: "
         "release. Activity outside it with no innocent explanation "
@@ -698,7 +718,9 @@ def verify_system_prompt(lang):
         "profile AND baseline is null or missing AND recent alone "
         "cannot distinguish normal from abnormal for this device, do "
         "not release; verdict keep and say in the reason that the "
-        "context was insufficient.\n"
+        "context was insufficient. A profile is usable if it "
+        "identifies the device class, even when its expected text "
+        "calls itself weak evidence.\n"
         "3. Identity: identity_source says how device.profile was "
         "matched (mac is certain; ip and name are weaker; unresolved "
         "means no profile matched and candidates are guesses). A "
@@ -718,6 +740,20 @@ def verify_system_prompt(lang):
         "5. Canary: if trigger is canary and evidence.canary_domain "
         "is canary.activeban.invalid or a subdomain of it, the probe "
         "is a deliberate health check by the operator: release.\n"
+        "6. New-destination bursts (evidence.recent.new_pair_count): "
+        "judge by the character of evidence.recent.top_new_domains "
+        "together with the device class. For a general-purpose "
+        "device (profile type pc or phone, or an expected text "
+        "stating destinations are unrestricted), a burst dominated "
+        "by recognizable mainstream services (browser or OS "
+        "telemetry, search, mail, major consumer platforms) is "
+        "ordinary use or a rebuilt baseline: release. For a "
+        "fixed-purpose appliance (IoT, camera, sensor), the normal "
+        "destination set is small and fixed, so a large burst is "
+        "outside it by definition: keep, unless the top domains are "
+        "plainly that vendor's own platform. Generated-looking or "
+        "long-tail junk domains dominating the list point the other "
+        "way for any device class: keep.\n"
         'Output JSON only: {"verdict": "release"|"keep", '
         '"reason": "...", "history_based": true|false} '
         "and write the reason field in " + reason_lang + ", concisely.")
